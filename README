@@ -1,0 +1,67 @@
+# PWC Backend
+
+Flask API for the Poway Woman's Club website.
+
+## Setup
+
+```bash
+cd pwc-backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # edit with your secrets
+python main.py          # runs on http://localhost:5001
+```
+
+A default admin account is seeded on first run:
+- username: `admin`
+- password: `admin`
+
+Change the password immediately.
+
+## API Endpoints
+
+### Auth (`/api/auth`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/register` | No | `{username, email, password}` |
+| POST | `/login` | No | `{username, password}` (username or email) |
+| POST | `/logout` | Yes | Ends session |
+| GET | `/me` | Yes | Returns current user |
+| POST | `/google` | No | `{code, redirect_uri}` — Google OAuth |
+
+### Events (`/api/events`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/` | No | List events (`?upcoming=true`) |
+| GET | `/:id` | No | Single event |
+| POST | `/` | Admin | `{title, description, location, start_time, end_time}` |
+| PUT | `/:id` | Admin | Update event |
+| DELETE | `/:id` | Admin | Delete event |
+| POST | `/:id/rsvp` | Yes | RSVP to event |
+| DELETE | `/:id/rsvp` | Yes | Cancel RSVP |
+
+### Blog (`/api/blog`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/posts` | No | List posts |
+| GET | `/posts/:id` | No | Single post with comments |
+| POST | `/posts` | Yes | `{title, body}` |
+| PUT | `/posts/:id` | Author/Admin | Update post |
+| DELETE | `/posts/:id` | Author/Admin | Delete post |
+| POST | `/posts/:id/comments` | Yes | `{body}` |
+| DELETE | `/comments/:id` | Author/Admin | Delete comment |
+
+### Payments (`/api/payments`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/dues` | Yes | Pay membership (stub) |
+| GET | `/history` | Yes | User's payment history |
+
+### Admin (`/api/admin`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/stats` | Admin | Dashboard stats |
+| GET | `/users` | Admin | List all users |
+| PUT | `/users/:id` | Admin | Update role / membership |
+| DELETE | `/users/:id` | Admin | Delete user |
