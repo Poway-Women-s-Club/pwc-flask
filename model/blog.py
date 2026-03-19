@@ -1,3 +1,5 @@
+"""Blog post and comment models."""
+
 from datetime import datetime
 from model.database import db
 
@@ -5,43 +7,48 @@ from model.database import db
 class BlogPost(db.Model):
     __tablename__ = "blog_posts"
 
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    body = db.Column(db.Text, nullable=False)
-    author_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id         = db.Column(db.Integer, primary_key=True)
+    title      = db.Column(db.String(255), nullable=False)
+    body       = db.Column(db.Text,        nullable=False)
+    author_id  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
 
-    comments = db.relationship("Comment", backref="post", lazy=True, cascade="all, delete-orphan")
+    comments = db.relationship("Comment", backref="post", lazy="dynamic",
+                               cascade="all, delete-orphan")
 
     def to_dict(self, include_comments=False):
-        data = {
-            "id": self.id,
-            "title": self.title,
-            "body": self.body,
-            "author": self.author.username if self.author else None,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-            "comment_count": len(self.comments),
+        d = {
+            "id":            self.id,
+            "title":         self.title,
+            "body":          self.body,
+            "author_id":     self.author_id,
+            "author":        self.author_user.username if self.author_user else None,
+            "comment_count": self.comments.count(),
+            "created_at":    self.created_at.isoformat(),
+            "updated_at":    self.updated_at.isoformat(),
         }
         if include_comments:
-            data["comments"] = [c.to_dict() for c in self.comments]
-        return data
+            d["comments"] = [c.to_dict() for c in self.comments.order_by(Comment.created_at)]
+        return d
 
 
 class Comment(db.Model):
     __tablename__ = "comments"
 
-    id = db.Column(db.Integer, primary_key=True)
-    body = db.Column(db.Text, nullable=False)
-    author_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey("blog_posts.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id         = db.Column(db.Integer, primary_key=True)
+    body       = db.Column(db.Text,    nullable=False)
+    author_id  = db.Column(db.Integer, db.ForeignKey("users.id"),      nullable=False)
+    post_id    = db.Column(db.Integer, db.ForeignKey("blog_posts.id"),  nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def to_dict(self):
         return {
-            "id": self.id,
-            "body": self.body,
-            "author": self.author.username if self.author else None,
+            "id":         self.id,
+            "body":       self.body,
+            "author_id":  self.author_id,
+            "author":     self.author_user.username if self.author_user else None,
+            "post_id":    self.post_id,
             "created_at": self.created_at.isoformat(),
         }

@@ -4,6 +4,8 @@ from flask_cors import CORS
 from flask_login import LoginManager
 from model.database import db
 from dotenv import load_dotenv
+from model.message import Message
+
 
 load_dotenv()
 
