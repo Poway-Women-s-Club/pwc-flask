@@ -1,96 +1,140 @@
-from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
+"""
+Blog API — posts and comments.
+
+SRP: Lookup, creation, ownership checks are separate functions.
+Orchestrator: Routes chain helpers in sequence.
+Error handling: @handle_errors on every route.
+"""
+
+from flask import Blueprint, jsonify
+
 from model.database import db
 from model.blog import BlogPost, Comment
+from api.utils import (
+    APIError, handle_errors, require_json, require_fields,
+    require_auth, require_owner_or_admin,
+)
 
 blog_bp = Blueprint("blog", __name__)
 
 
-@blog_bp.route("/posts", methods=["GET"])
-def list_posts():
-    posts = BlogPost.query.order_by(BlogPost.created_at.desc()).all()
-    return jsonify([p.to_dict() for p in posts])
+# ── Single-responsibility helpers ──
+
+def get_all_posts():
+    """Fetch all blog posts, newest first."""
+    return BlogPost.query.order_by(BlogPost.created_at.desc()).all()
 
 
-@blog_bp.route("/posts/<int:post_id>", methods=["GET"])
-def get_post(post_id):
-    post = BlogPost.query.get_or_404(post_id)
-    return jsonify(post.to_dict(include_comments=True))
+def get_post_or_404(post_id):
+    """Fetch a single post by ID or raise APIError."""
+    post = BlogPost.query.get(post_id)
+    if not post:
+        raise APIError("Post not found", 404)
+    return post
 
 
-@blog_bp.route("/posts", methods=["POST"])
-@login_required
-def create_post():
-    data = request.get_json()
-    if not data or not data.get("title") or not data.get("body"):
-        return jsonify({"error": "Title and body required"}), 400
+def get_comment_or_404(comment_id):
+    """Fetch a single comment by ID or raise APIError."""
+    comment = Comment.query.get(comment_id)
+    if not comment:
+        raise APIError("Comment not found", 404)
+    return comment
 
-    post = BlogPost(
-        title=data["title"],
-        body=data["body"],
-        author_id=current_user.id,
-    )
+
+def create_blog_post(title, body, author_id):
+    """Create and persist a new blog post."""
+    post = BlogPost(title=title, body=body, author_id=author_id)
     db.session.add(post)
     db.session.commit()
-    return jsonify(post.to_dict()), 201
+    return post
 
 
-@blog_bp.route("/posts/<int:post_id>", methods=["PUT"])
-@login_required
-def update_post(post_id):
-    post = BlogPost.query.get_or_404(post_id)
-    if post.author_id != current_user.id and current_user.role != "admin":
-        return jsonify({"error": "Not authorized"}), 403
-
-    data = request.get_json()
+def apply_post_updates(post, data):
+    """Apply partial updates to an existing post."""
     if "title" in data:
         post.title = data["title"]
     if "body" in data:
         post.body = data["body"]
 
+
+def create_comment_on_post(post_id, body, author_id):
+    """Create and persist a new comment on a post."""
+    comment = Comment(body=body, author_id=author_id, post_id=post_id)
+    db.session.add(comment)
+    db.session.commit()
+    return comment
+
+
+# ── Orchestrator routes ──
+
+@blog_bp.route("/posts", methods=["GET"])
+@handle_errors
+def list_posts():
+    """Orchestrator: fetch all → respond."""
+    posts = get_all_posts()
+    return jsonify([p.to_dict() for p in posts])
+
+
+@blog_bp.route("/posts/<int:post_id>", methods=["GET"])
+@handle_errors
+def get_post(post_id):
+    """Orchestrator: fetch post → respond with comments."""
+    post = get_post_or_404(post_id)
+    return jsonify(post.to_dict(include_comments=True))
+
+
+@blog_bp.route("/posts", methods=["POST"])
+@handle_errors
+def create_post():
+    """Orchestrator: require auth → parse body → validate → create → respond."""
+    user = require_auth()
+    data = require_json()
+    require_fields(data, "title", "body")
+    post = create_blog_post(data["title"], data["body"], user.id)
+    return jsonify(post.to_dict()), 201
+
+
+@blog_bp.route("/posts/<int:post_id>", methods=["PUT"])
+@handle_errors
+def update_post(post_id):
+    """Orchestrator: fetch post → check ownership → parse body → update → respond."""
+    post = get_post_or_404(post_id)
+    require_owner_or_admin(post.author_id)
+    data = require_json()
+    apply_post_updates(post, data)
     db.session.commit()
     return jsonify(post.to_dict())
 
 
 @blog_bp.route("/posts/<int:post_id>", methods=["DELETE"])
-@login_required
+@handle_errors
 def delete_post(post_id):
-    post = BlogPost.query.get_or_404(post_id)
-    if post.author_id != current_user.id and current_user.role != "admin":
-        return jsonify({"error": "Not authorized"}), 403
-
+    """Orchestrator: fetch post → check ownership → delete → respond."""
+    post = get_post_or_404(post_id)
+    require_owner_or_admin(post.author_id)
     db.session.delete(post)
     db.session.commit()
     return jsonify({"message": "Post deleted"})
 
 
-# --- Comments ---
-
 @blog_bp.route("/posts/<int:post_id>/comments", methods=["POST"])
-@login_required
-def create_comment(post_id):
-    BlogPost.query.get_or_404(post_id)
-    data = request.get_json()
-    if not data or not data.get("body"):
-        return jsonify({"error": "Body required"}), 400
-
-    comment = Comment(
-        body=data["body"],
-        author_id=current_user.id,
-        post_id=post_id,
-    )
-    db.session.add(comment)
-    db.session.commit()
+@handle_errors
+def add_comment(post_id):
+    """Orchestrator: require auth → verify post exists → parse body → create → respond."""
+    user = require_auth()
+    get_post_or_404(post_id)
+    data = require_json()
+    require_fields(data, "body")
+    comment = create_comment_on_post(post_id, data["body"], user.id)
     return jsonify(comment.to_dict()), 201
 
 
 @blog_bp.route("/comments/<int:comment_id>", methods=["DELETE"])
-@login_required
+@handle_errors
 def delete_comment(comment_id):
-    comment = Comment.query.get_or_404(comment_id)
-    if comment.author_id != current_user.id and current_user.role != "admin":
-        return jsonify({"error": "Not authorized"}), 403
-
+    """Orchestrator: fetch comment → check ownership → delete → respond."""
+    comment = get_comment_or_404(comment_id)
+    require_owner_or_admin(comment.author_id)
     db.session.delete(comment)
     db.session.commit()
     return jsonify({"message": "Comment deleted"})
