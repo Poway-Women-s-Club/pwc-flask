@@ -1,44 +1,66 @@
-from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
+"""
+Payments API — membership dues and history.
+
+SRP: Payment creation, user activation, and history query are separate.
+Orchestrator: Routes chain helpers.
+Error handling: @handle_errors on every route.
+"""
+
+from flask import Blueprint, jsonify
+
 from model.database import db
 from model.payment import Payment
+from api.utils import handle_errors, require_auth
 
 payments_bp = Blueprint("payments", __name__)
 
-MEMBERSHIP_DUES_CENTS = 5000  # $50.00 — adjust as needed
+MEMBERSHIP_DUES_CENTS = 5000  # $50.00
 
 
-@payments_bp.route("/dues", methods=["POST"])
-@login_required
-def pay_dues():
-    """
-    Stub for membership payment.
-    In production, this would create a Stripe checkout session
-    and return a redirect URL. For now it just records the payment.
-    """
+# ── Single-responsibility helpers ──
+
+def record_payment(user_id, amount_cents, description):
+    """Create a payment record in the database."""
     payment = Payment(
-        user_id=current_user.id,
-        amount_cents=MEMBERSHIP_DUES_CENTS,
-        description="Annual Membership Dues",
-        status="completed",  # would be "pending" with real payment flow
+        user_id=user_id,
+        amount_cents=amount_cents,
+        description=description,
+        status="completed",
         payment_method="stub",
     )
     db.session.add(payment)
+    return payment
 
-    # Mark user as active member
-    current_user.is_active_member = True
+
+def activate_membership(user):
+    """Mark a user as an active member."""
+    user.is_active_member = True
+
+
+def get_user_payments(user_id):
+    """Fetch all payments for a user, newest first."""
+    return Payment.query.filter_by(user_id=user_id).order_by(
+        Payment.created_at.desc()
+    ).all()
+
+
+# ── Orchestrator routes ──
+
+@payments_bp.route("/dues", methods=["POST"])
+@handle_errors
+def pay_dues():
+    """Orchestrator: require auth → record payment → activate membership → respond."""
+    user = require_auth()
+    payment = record_payment(user.id, MEMBERSHIP_DUES_CENTS, "Annual Membership Dues")
+    activate_membership(user)
     db.session.commit()
-
-    return jsonify({
-        "message": "Payment recorded",
-        "payment": payment.to_dict(),
-    }), 201
+    return jsonify({"message": "Payment recorded", "payment": payment.to_dict()}), 201
 
 
 @payments_bp.route("/history", methods=["GET"])
-@login_required
+@handle_errors
 def payment_history():
-    payments = Payment.query.filter_by(user_id=current_user.id).order_by(
-        Payment.created_at.desc()
-    ).all()
+    """Orchestrator: require auth → query payments → respond."""
+    user = require_auth()
+    payments = get_user_payments(user.id)
     return jsonify([p.to_dict() for p in payments])
