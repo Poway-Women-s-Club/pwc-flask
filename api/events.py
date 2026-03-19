@@ -9,9 +9,14 @@ Error handling: @handle_errors on every route.
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from datetime import datetime, timezone
+
 from model.database import db
 from model.event import Event, RSVP, PublicRSVP, MeetingRequest
 from model.user import User
+from api.utils import (
+    APIError, handle_errors, require_json, require_fields,
+    require_auth, require_admin,
+)
 
 events_bp = Blueprint("events", __name__)
 
@@ -62,6 +67,65 @@ def _get_payload():
         return json_data
     return request.form.to_dict()
 
+
+# ── Single-responsibility helpers ──
+
+def query_events(upcoming_only):
+    """Fetch events, optionally filtering to upcoming only."""
+    query = Event.query
+    if upcoming_only:
+        query = query.filter(Event.start_time >= datetime.utcnow())
+    return query.order_by(Event.start_time.asc()).all()
+
+
+def get_event_or_404(event_id):
+    """Fetch a single event by ID or raise APIError."""
+    event = Event.query.get(event_id)
+    if not event:
+        raise APIError("Event not found", 404)
+    return event
+
+
+def parse_datetime(value, field_name):
+    """Parse an ISO datetime string, raising APIError on bad format."""
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        raise APIError(f"Invalid datetime format for {field_name}", 400)
+
+
+def build_event(data, creator_id):
+    """Create an Event object from validated data."""
+    return Event(
+        title=data["title"],
+        description=data.get("description", ""),
+        location=data.get("location", ""),
+        start_time=parse_datetime(data["start_time"], "start_time"),
+        end_time=parse_datetime(data["end_time"], "end_time") if data.get("end_time") else None,
+        created_by=creator_id,
+    )
+
+
+def apply_event_updates(event, data):
+    """Apply partial updates to an existing event."""
+    if "title" in data:
+        event.title = data["title"]
+    if "description" in data:
+        event.description = data["description"]
+    if "location" in data:
+        event.location = data["location"]
+    if "start_time" in data:
+        event.start_time = parse_datetime(data["start_time"], "start_time")
+    if "end_time" in data:
+        event.end_time = parse_datetime(data["end_time"], "end_time") if data["end_time"] else None
+
+
+def check_existing_rsvp(user_id, event_id):
+    """Return existing RSVP or None."""
+    return RSVP.query.filter_by(user_id=user_id, event_id=event_id).first()
+
+
+# ── Orchestrator routes ──
 
 @events_bp.route("/", methods=["GET"])
 @handle_errors
