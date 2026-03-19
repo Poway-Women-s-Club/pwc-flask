@@ -62,6 +62,24 @@ def admin_panel():
 # Create tables and seed sample data on first run
 with app.app_context():
     db.create_all()
+    # Lightweight schema sync for this project (no migrations).
+    # If you change the model and the DB already exists (SQLite),
+    # make sure new columns exist so inserts won't fail.
+    try:
+        from sqlalchemy import inspect as sql_inspect, text
+
+        inspector = sql_inspect(db.engine)
+        if "meeting_requests" in inspector.get_table_names():
+            cols = {c["name"] for c in inspector.get_columns("meeting_requests")}
+            if "preferred_end_datetime" not in cols:
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        text("ALTER TABLE meeting_requests ADD COLUMN preferred_end_datetime DATETIME")
+                    )
+                print("Added column: meeting_requests.preferred_end_datetime")
+    except Exception as e:
+        # Non-fatal: app can still start, but meeting requests may fail until schema is updated.
+        print("Schema sync skipped/failed:", e)
 
     from model.user import User
     from model.event import Event, RSVP
