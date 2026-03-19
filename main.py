@@ -79,6 +79,28 @@ with app.app_context():
                         text("ALTER TABLE meeting_requests ADD COLUMN preferred_end_datetime DATETIME")
                     )
                 print("Added column: meeting_requests.preferred_end_datetime")
+
+        # Users table schema sync (SQLite has no migrations; add missing columns).
+        if "users" in inspector.get_table_names():
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            with db.engine.begin() as conn:
+                # Profile fields expected by model/user.py
+                if "first_name" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN first_name VARCHAR(80) NOT NULL DEFAULT ''"))
+                    print("Added column: users.first_name")
+                if "last_name" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN last_name VARCHAR(80) NOT NULL DEFAULT ''"))
+                    print("Added column: users.last_name")
+                if "bio" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''"))
+                    print("Added column: users.bio")
+                if "languages" not in user_cols:
+                    # Stored as JSON text in SQLite.
+                    conn.execute(text("ALTER TABLE users ADD COLUMN languages TEXT NOT NULL DEFAULT '[]'"))
+                    print("Added column: users.languages")
+                if "interests" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN interests TEXT NOT NULL DEFAULT '[]'"))
+                    print("Added column: users.interests")
     except Exception as e:
         # Non-fatal: app can still start, but meeting requests may fail until schema is updated.
         print("Schema sync skipped/failed:", e)
