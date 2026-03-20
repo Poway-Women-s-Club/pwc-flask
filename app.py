@@ -123,6 +123,17 @@ def _sync_schema():
                 for col, typedef in new_cols.items():
                     if col not in user_cols:
                         conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typedef}"))
+        if "blog_posts" in inspector.get_table_names():
+            blog_cols = {c["name"] for c in inspector.get_columns("blog_posts")}
+            blog_new = {
+                "is_pinned":      "BOOLEAN NOT NULL DEFAULT 0",
+                "pin_expires_at": "DATETIME",
+            }
+            with db.engine.begin() as conn:
+                for col, typedef in blog_new.items():
+                    if col not in blog_cols:
+                        conn.execute(text(f"ALTER TABLE blog_posts ADD COLUMN {col} {typedef}"))
+
     except Exception as e:
         print("Schema sync skipped/failed:", e)
 

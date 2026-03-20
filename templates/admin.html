@@ -416,7 +416,7 @@
           </div>
           <table>
             <thead><tr><th>ID</th><th>Title</th><th>Author</th><th>Comments</th><th>Created</th><th>Actions</th></tr></thead>
-            <tbody id="posts-body"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+            <tbody id="posts-body"><tr><td colspan="7" class="empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -605,20 +605,24 @@ async function deleteEvent(id) {
 
 // Blog
 async function loadPosts() {
-  const r = await api('GET', '/api/blog/posts');
+  const r = await api('GET', '/api/blog/posts?per_page=50');
   const body = document.getElementById('posts-body');
-  if (r.status !== 200 || !r.data.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">No posts yet</td></tr>';
+  const posts = r.status === 200 ? (r.data.posts || r.data) : [];
+  if (!posts.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">No posts yet</td></tr>';
     return;
   }
-  body.innerHTML = r.data.map(p => `
+  body.innerHTML = posts.map(p => `
     <tr>
       <td>${p.id}</td>
-      <td>${p.title}</td>
+      <td>${p.is_pinned ? '📌 ' : ''}${p.title}</td>
       <td>${p.author || '-'}</td>
       <td>${p.comment_count}</td>
       <td>${new Date(p.created_at).toLocaleDateString()}</td>
-      <td><button class="btn btn-danger" onclick="deletePost(${p.id})">Delete</button></td>
+      <td>
+        <button class="btn" onclick="${p.is_pinned ? `unpinPost(${p.id})` : `pinPost(${p.id})`}">${p.is_pinned ? 'Unpin' : 'Pin'}</button>
+        <button class="btn btn-danger" onclick="deletePost(${p.id})">Delete</button>
+      </td>
     </tr>
   `).join('');
 }
@@ -630,6 +634,18 @@ async function createPost() {
   await api('POST', '/api/blog/posts', { title, body });
   document.getElementById('post-title').value = '';
   document.getElementById('post-body').value = '';
+  loadPosts();
+}
+
+async function pinPost(id) {
+  const days = prompt('Pin for how many days? (0 or blank = indefinitely)', '0');
+  if (days === null) return;
+  await api('POST', `/api/blog/posts/${id}/pin`, { days: parseInt(days) || 0 });
+  loadPosts();
+}
+
+async function unpinPost(id) {
+  await api('DELETE', `/api/blog/posts/${id}/pin`);
   loadPosts();
 }
 
