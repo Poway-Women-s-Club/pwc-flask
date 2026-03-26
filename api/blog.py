@@ -9,9 +9,11 @@ Error handling: @handle_errors on every route.
 from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
+from flask_login import current_user
 
 from model.database import db
 from model.blog import BlogPost, Comment
+from model.group import UserGroup
 from api.utils import (
     APIError, handle_errors, require_json, require_fields,
     require_auth, require_admin, require_owner_or_admin,
@@ -22,9 +24,32 @@ blog_bp = Blueprint("blog", __name__)
 
 # ── Single-responsibility helpers ──
 
+def get_visible_group_ids():
+    """Return set of group IDs the current user belongs to (empty if not logged in)."""
+    if not current_user.is_authenticated:
+        return set()
+    memberships = UserGroup.query.filter_by(user_id=current_user.id).all()
+    return {m.group_id for m in memberships}
+
+
 def build_post_query(args):
     """Build a filtered, sorted query from request args."""
     q = BlogPost.query
+
+    # Group visibility: hide group-exclusive posts unless user is a member
+    user_group_ids = get_visible_group_ids()
+    if user_group_ids:
+        q = q.filter(db.or_(
+            BlogPost.group_id.is_(None),
+            BlogPost.group_id.in_(user_group_ids),
+        ))
+    else:
+        q = q.filter(BlogPost.group_id.is_(None))
+
+    # Filter by group
+    group_id = args.get("group_id", "").strip()
+    if group_id:
+        q = q.filter(BlogPost.group_id == int(group_id))
 
     # Search by title or body
     search = args.get("search", "").strip()
@@ -100,9 +125,9 @@ def get_comment_or_404(comment_id):
     return comment
 
 
-def create_blog_post(title, body, author_id):
+def create_blog_post(title, body, author_id, group_id=None):
     """Create and persist a new blog post."""
-    post = BlogPost(title=title, body=body, author_id=author_id)
+    post = BlogPost(title=title, body=body, author_id=author_id, group_id=group_id)
     db.session.add(post)
     db.session.commit()
     return post
@@ -114,6 +139,8 @@ def apply_post_updates(post, data):
         post.title = data["title"]
     if "body" in data:
         post.body = data["body"]
+    if "group_id" in data:
+        post.group_id = data["group_id"] or None
 
 
 def create_comment_on_post(post_id, body, author_id):
@@ -156,7 +183,14 @@ def create_post():
     user = require_auth()
     data = require_json()
     require_fields(data, "title", "body")
-    post = create_blog_post(data["title"], data["body"], user.id)
+    group_id = data.get("group_id") or None
+    if group_id:
+        group_id = int(group_id)
+        from model.group import Group
+        grp = Group.query.get(group_id)
+        if not grp:
+            raise APIError("Group not found", 404)
+    post = create_blog_post(data["title"], data["body"], user.id, group_id=group_id)
     return jsonify(post.to_dict()), 201
 
 

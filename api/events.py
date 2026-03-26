@@ -103,6 +103,7 @@ def build_event(data, creator_id):
         start_time=parse_datetime(data["start_time"], "start_time"),
         end_time=parse_datetime(data["end_time"], "end_time") if data.get("end_time") else None,
         created_by=creator_id,
+        group_id=int(data["group_id"]) if data.get("group_id") else None,
     )
 
 
@@ -118,6 +119,8 @@ def apply_event_updates(event, data):
         event.start_time = parse_datetime(data["start_time"], "start_time")
     if "end_time" in data:
         event.end_time = parse_datetime(data["end_time"], "end_time") if data["end_time"] else None
+    if "group_id" in data:
+        event.group_id = int(data["group_id"]) if data["group_id"] else None
 
 
 def check_existing_rsvp(user_id, event_id):

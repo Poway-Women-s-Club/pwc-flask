@@ -14,12 +14,19 @@ class Event(db.Model):
     start_time  = db.Column(db.DateTime,    nullable=False)
     end_time    = db.Column(db.DateTime,    nullable=True)
     created_by  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    group_id    = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     rsvps = db.relationship("RSVP", backref="event", lazy="dynamic",
                             cascade="all, delete-orphan")
 
     def to_dict(self):
+        group_name = None
+        if self.group_id:
+            from model.group import Group
+            grp = Group.query.get(self.group_id)
+            if grp:
+                group_name = grp.name
         return {
             "id":          self.id,
             "title":       self.title,
@@ -29,6 +36,8 @@ class Event(db.Model):
             "end_time":    self.end_time.isoformat() if self.end_time else None,
             "rsvp_count":  self.rsvps.count(),
             "created_by":  self.created_by,
+            "group_id":    self.group_id,
+            "group_name":  group_name,
             "created_at":  self.created_at.isoformat(),
         }
 

@@ -70,6 +70,7 @@ def create_app(config=None):
     from api.payments import payments_bp
     from api.messages import messages_bp
     from api.profile  import profile_bp
+    from api.groups   import groups_bp
 
     app.register_blueprint(auth_bp,     url_prefix="/api/auth")
     app.register_blueprint(admin_bp,    url_prefix="/api/admin")
@@ -78,6 +79,7 @@ def create_app(config=None):
     app.register_blueprint(payments_bp, url_prefix="/api/payments")
     app.register_blueprint(messages_bp, url_prefix="/api/messages")
     app.register_blueprint(profile_bp,  url_prefix="/api/profile")
+    app.register_blueprint(groups_bp,   url_prefix="/api/groups")
 
     # ── Health check ───────────────────────────────────────────────
     @app.route("/api/health")
@@ -128,11 +130,18 @@ def _sync_schema():
             blog_new = {
                 "is_pinned":      "BOOLEAN NOT NULL DEFAULT 0",
                 "pin_expires_at": "DATETIME",
+                "group_id":       "INTEGER REFERENCES groups(id)",
             }
             with db.engine.begin() as conn:
                 for col, typedef in blog_new.items():
                     if col not in blog_cols:
                         conn.execute(text(f"ALTER TABLE blog_posts ADD COLUMN {col} {typedef}"))
+
+        if "events" in inspector.get_table_names():
+            event_cols = {c["name"] for c in inspector.get_columns("events")}
+            if "group_id" not in event_cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN group_id INTEGER REFERENCES groups(id)"))
 
     except Exception as e:
         print("Schema sync skipped/failed:", e)
@@ -148,6 +157,7 @@ def _seed_data():
     from model.event import Event, RSVP
     from model.blog import BlogPost, Comment
     from model.payment import Payment
+    from model.group import Group, UserGroup
 
     # --- Users ---
     admin = User(
@@ -324,8 +334,29 @@ def _seed_data():
     ]
     db.session.add_all(payments)
 
+    # --- Groups ---
+    arts_group = Group(name="Arts Committee", description="Members who plan and organize art exhibits and cultural events.", created_by=linda.id)
+    social_group = Group(name="Social Events", description="Plan social gatherings, teas, and community get-togethers.", created_by=admin.id)
+    scholarship_group = Group(name="Scholarship Committee", description="Review and award HOBY scholarships to local students.", created_by=linda.id)
+
+    db.session.add_all([arts_group, social_group, scholarship_group])
+    db.session.flush()
+
+    group_memberships = [
+        UserGroup(user_id=linda.id, group_id=arts_group.id),
+        UserGroup(user_id=evan.id, group_id=arts_group.id),
+        UserGroup(user_id=maya.id, group_id=arts_group.id),
+        UserGroup(user_id=admin.id, group_id=social_group.id),
+        UserGroup(user_id=karen.id, group_id=social_group.id),
+        UserGroup(user_id=janet.id, group_id=social_group.id),
+        UserGroup(user_id=linda.id, group_id=scholarship_group.id),
+        UserGroup(user_id=maya.id, group_id=scholarship_group.id),
+        UserGroup(user_id=cyrus.id, group_id=scholarship_group.id),
+    ]
+    db.session.add_all(group_memberships)
+
     db.session.commit()
-    print("Seeded: 7 users, 7 events, 12 RSVPs, 4 posts, 8 comments, 6 payments")
+    print("Seeded: 7 users, 7 events, 12 RSVPs, 4 posts, 8 comments, 6 payments, 3 groups")
     print("Login: admin/admin123, evan/password, maya/password")
 
 
