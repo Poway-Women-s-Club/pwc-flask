@@ -1,0 +1,12 @@
+      version: '3'
+      services:
+              web:
+                      image: pwc
+                      build: .
+                      env_file:
+                              - .env
+                      ports:
+                              - "8327:8327"
+                      volumes:
+                              - ./instance:/instance
+                      restart: unless-stopped

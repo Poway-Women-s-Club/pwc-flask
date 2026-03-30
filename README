@@ -9,7 +9,7 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # edit with your secrets
-python main.py          # runs on http://localhost:5001
+python main.py          # runs on http://localhost:8327
 ```
 
 A default admin account is seeded on first run:

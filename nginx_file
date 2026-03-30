@@ -1,0 +1,19 @@
+  server {
+      listen 80;
+      listen [::]:80;
+      server_name pwc.opencodingsociety.com;
+
+      location / {
+          proxy_pass http://localhost:8327;
+
+          # Preflighted requests
+          if ($request_method = OPTIONS) {
+              add_header "Access-Control-Allow-Credentials" "true" always;
+              add_header "Access-Control-Allow-Origin"  "https://open-coding-society.github.io" always;
+              add_header "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
+              add_header "Access-Control-Allow-MaxAge" 600 always;
+              add_header "Access-Control-Allow-Headers" "Authorization, Origin, X-Origin, X-Requested-With, Content-Type, Accept" always;
+              return 204;
+          }
+      }
+  }
