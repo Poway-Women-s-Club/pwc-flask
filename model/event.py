@@ -15,10 +15,16 @@ class Event(db.Model):
     end_time    = db.Column(db.DateTime,    nullable=True)
     created_by  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     group_id    = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=True)
+    # "club" (entire club) or "groups" (restricted to selected groups).
+    visibility_scope = db.Column(db.String(16), nullable=False, default="club")
+    # None means unlimited seats.
+    max_attendees = db.Column(db.Integer, nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     rsvps = db.relationship("RSVP", backref="event", lazy="dynamic",
                             cascade="all, delete-orphan")
+    visible_groups = db.relationship("EventVisibleGroup", backref="event", lazy="dynamic",
+                                     cascade="all, delete-orphan")
 
     def to_dict(self):
         group_name = None
@@ -27,6 +33,14 @@ class Event(db.Model):
             grp = Group.query.get(self.group_id)
             if grp:
                 group_name = grp.name
+        public_yes = (
+            PublicRSVP.query.filter_by(event_id=self.id)
+            .filter(PublicRSVP.attendance == "yes")
+            .count()
+        )
+        logged_in = self.rsvps.count()
+        seats_used = logged_in + public_yes
+        fill_ratio = (seats_used / self.max_attendees) if self.max_attendees else 0.0
         return {
             "id":          self.id,
             "title":       self.title,
@@ -34,10 +48,16 @@ class Event(db.Model):
             "location":    self.location,
             "start_time":  self.start_time.isoformat(),
             "end_time":    self.end_time.isoformat() if self.end_time else None,
-            "rsvp_count":  self.rsvps.count(),
+            "rsvp_count":  logged_in,
+            "max_attendees": self.max_attendees,
+            "seats_used": seats_used,
+            "fill_ratio": round(fill_ratio, 4),
+            "is_full": bool(self.max_attendees and seats_used >= self.max_attendees),
             "created_by":  self.created_by,
             "group_id":    self.group_id,
             "group_name":  group_name,
+            "visibility_scope": self.visibility_scope or "club",
+            "visible_group_ids": [vg.group_id for vg in self.visible_groups.all()],
             "created_at":  self.created_at.isoformat(),
         }
 
@@ -99,3 +119,14 @@ class MeetingRequest(db.Model):
     description = db.Column(db.Text, nullable=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EventVisibleGroup(db.Model):
+    """Group visibility mapping for events restricted to selected groups."""
+    __tablename__ = "event_visible_groups"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("events.id"), nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("event_id", "group_id"),)

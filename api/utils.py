@@ -43,6 +43,13 @@ def require_auth():
     return current_user
 
 
+def optional_auth():
+    """Return current user if logged in, else None."""
+    if current_user.is_authenticated:
+        return current_user
+    return None
+
+
 def require_admin():
     """Return current user or raise APIError if not admin."""
     user = require_auth()

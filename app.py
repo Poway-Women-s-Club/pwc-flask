@@ -95,6 +95,7 @@ def create_app(config=None):
         db.create_all()
         _sync_schema()
         _seed_data()
+        _ensure_cyrus_admin_account()
 
     return app
 
@@ -142,9 +143,67 @@ def _sync_schema():
             if "group_id" not in event_cols:
                 with db.engine.begin() as conn:
                     conn.execute(text("ALTER TABLE events ADD COLUMN group_id INTEGER REFERENCES groups(id)"))
+            if "max_attendees" not in event_cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN max_attendees INTEGER"))
+            if "visibility_scope" not in event_cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN visibility_scope VARCHAR(16) NOT NULL DEFAULT 'club'"))
+
+        if "event_visible_groups" not in inspector.get_table_names():
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS event_visible_groups ("
+                    "id INTEGER PRIMARY KEY, "
+                    "event_id INTEGER NOT NULL REFERENCES events(id), "
+                    "group_id INTEGER NOT NULL REFERENCES groups(id), "
+                    "UNIQUE(event_id, group_id)"
+                    ")"
+                ))
+
+        if "groups" in inspector.get_table_names():
+            group_cols = {c["name"] for c in inspector.get_columns("groups")}
+            if "requires_application" not in group_cols:
+                with db.engine.begin() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE groups ADD COLUMN requires_application BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+
+        if "group_applications" not in inspector.get_table_names():
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS group_applications ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "user_id INTEGER NOT NULL REFERENCES users(id), "
+                    "group_id INTEGER NOT NULL REFERENCES groups(id), "
+                    "message TEXT NOT NULL DEFAULT '', "
+                    "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                    "created_at DATETIME NOT NULL, "
+                    "decided_at DATETIME, "
+                    "UNIQUE(user_id, group_id)"
+                    ")"
+                ))
+        elif "group_applications" in inspector.get_table_names():
+            ga_cols = {c["name"] for c in inspector.get_columns("group_applications")}
+            with db.engine.begin() as conn:
+                if "decided_at" not in ga_cols:
+                    conn.execute(text(
+                        "ALTER TABLE group_applications ADD COLUMN decided_at DATETIME"
+                    ))
 
     except Exception as e:
         print("Schema sync skipped/failed:", e)
+
+
+def _ensure_cyrus_admin_account():
+    """Keep demo account as admin for testing attendee controls."""
+    try:
+        u = User.query.filter_by(username="cyrus").first()
+        if u and u.role != "admin":
+            u.role = "admin"
+            db.session.commit()
+    except Exception as e:
+        print("ensure_cyrus_admin skipped/failed:", e)
 
 
 def _seed_data():
@@ -362,4 +421,4 @@ def _seed_data():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, port=8327)
+    app.run(debug=True, port=5001)
