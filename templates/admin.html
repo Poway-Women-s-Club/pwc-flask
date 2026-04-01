@@ -270,6 +270,73 @@
 
     .response-box.error { color: var(--red); }
 
+    /* Login overlay */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .login-overlay.hidden { display: none; }
+
+    .login-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+      width: 320px;
+    }
+
+    .login-box h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .login-box p {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+    }
+
+    .login-box input {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      margin-bottom: 0.75rem;
+    }
+
+    .login-box button {
+      width: 100%;
+      padding: 0.5rem;
+      background: var(--accent);
+      border: none;
+      border-radius: 4px;
+      color: white;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .login-box button:hover { opacity: 0.9; }
+
+    .login-error {
+      font-size: 12px;
+      color: var(--red);
+      margin-top: 0.5rem;
+      min-height: 16px;
+    }
+
     /* Tabs (panel switching) */
     .panel { display: none; }
     .panel.active { display: block; }
@@ -304,6 +371,18 @@
   </style>
 </head>
 <body>
+  <!-- Login overlay -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-box">
+      <h2>PWC Admin</h2>
+      <p>Sign in with your admin account</p>
+      <input type="text" id="login-username" placeholder="Username or email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <button onclick="doLogin()">Sign In</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
   <div class="shell">
     <!-- Sidebar -->
     <nav class="sidebar">
@@ -317,8 +396,9 @@
       <a class="nav-item" onclick="showPanel('blog')">Blog Posts</a>
       <a class="nav-item" onclick="showPanel('payments')">Payments</a>
       <a class="nav-item" onclick="showPanel('tester')">API Tester</a>
+      <a class="nav-item" onclick="doLogout()" style="color:var(--red);">Logout</a>
       <div class="sidebar-footer">
-        Server: <span>running</span><br>
+        Logged in as: <span id="logged-in-user">-</span><br>
         <span id="server-time"></span>
       </div>
     </nav>
@@ -461,14 +541,14 @@
             <tr>
               <td><button class="btn" onclick="quickReq('GET','/api/health')">Health Check</button></td>
               <td><button class="btn" onclick="quickReq('GET','/api/auth/me')">Who Am I?</button></td>
-              <td><button class="btn" onclick="quickReq('POST','/api/auth/login',{username:'admin',password:'admin'})">Login as Admin</button></td>
               <td><button class="btn" onclick="quickReq('GET','/api/admin/stats')">Get Stats</button></td>
+              <td><button class="btn" onclick="quickReq('GET','/api/admin/users')">All Users</button></td>
             </tr>
             <tr>
               <td><button class="btn" onclick="quickReq('GET','/api/events/?upcoming=false')">All Events</button></td>
               <td><button class="btn" onclick="quickReq('GET','/api/blog/posts')">All Posts</button></td>
-              <td><button class="btn" onclick="quickReq('GET','/api/admin/users')">All Users</button></td>
-              <td><button class="btn" onclick="quickReq('POST','/api/auth/logout')">Logout</button></td>
+              <td><button class="btn" onclick="quickReq('GET','/api/groups/')">All Groups</button></td>
+              <td><button class="btn" onclick="doLogout()">Logout</button></td>
             </tr>
           </table>
         </div>
@@ -507,15 +587,50 @@ async function api(method, path, body) {
   return { status: res.status, data: await res.json() };
 }
 
+// Auth check — show login screen if not authenticated as admin
+async function checkAuth() {
+  const me = await api('GET', '/api/auth/me');
+  if (me.status !== 200 || me.data.role !== 'admin') {
+    document.getElementById('login-overlay').classList.remove('hidden');
+    return false;
+  }
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('logged-in-user').textContent = me.data.username;
+  return true;
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+
+  const r = await api('POST', '/api/auth/login', { username, password });
+  if (r.status === 200) {
+    const authed = await checkAuth();
+    if (authed) loadStats();
+    else errEl.textContent = 'Account is not an admin.';
+  } else {
+    errEl.textContent = r.data.error || 'Invalid credentials.';
+  }
+}
+
+async function doLogout() {
+  await api('POST', '/api/auth/logout');
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('logged-in-user').textContent = '-';
+}
+
+// Allow pressing Enter to submit login
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('login-overlay').classList.contains('hidden')) {
+    doLogin();
+  }
+});
+
 // Dashboard stats
 async function loadStats() {
-  // Try admin stats first, fall back to basic counts
   try {
-    // Login as admin first if not already
-    const me = await api('GET', '/api/auth/me');
-    if (me.status === 401) {
-      await api('POST', '/api/auth/login', { username: 'admin', password: 'admin' });
-    }
     const r = await api('GET', '/api/admin/stats');
     if (r.status === 200) {
       document.getElementById('s-users').textContent = r.data.users;
@@ -698,8 +813,8 @@ setInterval(() => {
   document.getElementById('server-time').textContent = new Date().toLocaleTimeString();
 }, 1000);
 
-// Auto-load dashboard
-loadStats();
+// Auto-load dashboard after auth check
+checkAuth().then(authed => { if (authed) loadStats(); });
 </script>
 </body>
 </html>
