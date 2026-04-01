@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from model.database import db
 from model.event import Event, RSVP, PublicRSVP, MeetingRequest, EventVisibleGroup
 from model.user import User
+from services.email_outbound import send_plain_email
 from model.group import UserGroup, Group
 from api.utils import (
     APIError, handle_errors, require_json, require_fields,
@@ -254,6 +255,45 @@ def check_existing_rsvp(user_id, event_id):
     return RSVP.query.filter_by(user_id=user_id, event_id=event_id).first()
 
 
+def _coerce_wants_reminder(data):
+    if not data:
+        return False
+    if data.get("wants_email_reminder") is True:
+        return True
+    if data.get("wants_reminders") is True:
+        return True
+    return False
+
+
+def _send_reminder_confirmation_email(user, event):
+    """Notify member that email reminders are active for this RSVP. Returns True if SMTP sent."""
+    from flask import current_app
+
+    subject = "Meeting reminders enabled — Poway Woman's Club"
+    when = event.start_time.strftime("%Y-%m-%d %H:%M UTC")
+    loc = event.location or "TBA"
+    body = (
+        f"Hello {user.first_name or user.username},\n\n"
+        f"You successfully signed up for email reminders for this event:\n\n"
+        f"  {event.title}\n"
+        f"  When: {when}\n"
+        f"  Where: {loc}\n\n"
+        f"We will send a reminder to this address ({user.email}) shortly before the meeting.\n\n"
+        f"— Poway Woman's Club\n"
+    )
+    try:
+        ok = send_plain_email(user.email, subject, body)
+        if not ok:
+            current_app.logger.warning(
+                "Reminder confirmation not sent: configure MAIL_SERVER, MAIL_USERNAME, "
+                "MAIL_PASSWORD (and optionally MAIL_DEFAULT_SENDER) in .env"
+            )
+        return bool(ok)
+    except Exception:
+        current_app.logger.exception("Reminder confirmation email failed (SMTP error)")
+        return False
+
+
 # ── Orchestrator routes ──
 
 @events_bp.route("/", methods=["GET"])
@@ -274,7 +314,9 @@ def get_event(event_id):
         raise APIError("Event not found", 404)
     data = event.to_dict()
     if current_user.is_authenticated:
-        data["user_rsvped"] = check_existing_rsvp(current_user.id, event_id) is not None
+        row = check_existing_rsvp(current_user.id, event_id)
+        data["user_rsvped"] = row is not None
+        data["user_wants_email_reminder"] = bool(row and row.wants_email_reminder)
     return jsonify(data)
 
 
@@ -321,19 +363,62 @@ def delete_event(event_id):
 @events_bp.route("/<int:event_id>/rsvp", methods=["POST"])
 @handle_errors
 def rsvp(event_id):
-    """Orchestrator: require auth → verify event exists → check duplicate → create RSVP."""
+    """Create RSVP or update email-reminder preference for an existing RSVP."""
     user = require_auth()
     event = get_event_or_404(event_id)
     if not _is_event_visible_to_user(event, user):
         raise APIError("Not authorized for this event", 403)
-    if check_existing_rsvp(user.id, event_id):
-        return jsonify({"message": "Already RSVPed"}), 200
+
+    data = request.get_json(silent=True) or {}
+    wants_reminder = _coerce_wants_reminder(data)
+
+    existing = check_existing_rsvp(user.id, event_id)
+    if existing:
+        if wants_reminder and not user.google_id:
+            raise APIError(
+                "Link a Google account to receive email reminders for meetings. "
+                "Sign in with Google using the same email as your member account, "
+                "or open Profile → Security and use “Connect Google”.",
+                400,
+            )
+        prev = existing.wants_email_reminder
+        existing.wants_email_reminder = wants_reminder
+        if wants_reminder:
+            existing.reminder_sent_at = None
+        db.session.commit()
+        sent = False
+        if wants_reminder and not prev:
+            sent = _send_reminder_confirmation_email(user, event)
+        return jsonify({
+            "message": "RSVP updated",
+            "wants_email_reminder": existing.wants_email_reminder,
+            "reminder_confirmation_email_sent": sent,
+        }), 200
+
     if event.max_attendees and _seats_used_for_event(event_id) >= event.max_attendees:
         raise APIError("Event is full", 403)
-    new_rsvp = RSVP(user_id=user.id, event_id=event_id)
+    if wants_reminder and not user.google_id:
+        raise APIError(
+            "Link a Google account to receive email reminders for meetings. "
+            "Sign in with Google using the same email as your member account, "
+            "or open Profile → Security and use “Connect Google”.",
+            400,
+        )
+    new_rsvp = RSVP(
+        user_id=user.id,
+        event_id=event_id,
+        wants_email_reminder=wants_reminder,
+    )
     db.session.add(new_rsvp)
     db.session.commit()
-    return jsonify({"message": "RSVPed"}), 201
+    sent = False
+    if wants_reminder:
+        sent = _send_reminder_confirmation_email(user, event)
+    return jsonify({
+        "message": "RSVPed",
+        "wants_email_reminder": wants_reminder,
+        "reminder_confirmation_email_sent": sent,
+    }), 201
 
 
 @events_bp.route("/<int:event_id>/rsvp", methods=["DELETE"])

@@ -1,5 +1,10 @@
 venv/
+.venv/
 .env
 __pycache__/
 *.pyc
+
+# SQLite — per machine / deploy; never commit (avoids merge conflicts)
+*.db
+instance/*.db
 

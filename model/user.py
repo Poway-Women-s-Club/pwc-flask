@@ -61,6 +61,7 @@ class User(UserMixin, db.Model):
             "email":            self.email,
             "role":             self.role,
             "is_active_member": self.is_active_member,
+            "hasGoogleLinked":  bool(self.google_id),
             # Profile fields — match sessionStorage contract in profile.js
             "firstName":        self.first_name,
             "lastName":         self.last_name,

@@ -64,6 +64,22 @@ def find_user_by_credentials(identifier, password):
     return user
 
 
+def normalize_oauth_redirect_uri(uri):
+    """GIS popup flow: redirect_uri must be the frontend origin (https://host[:port])."""
+    if not uri or not isinstance(uri, str):
+        raise APIError("redirect_uri is required", 400)
+    u = uri.strip().rstrip("/")
+    allowed = current_app.config.get("OAUTH_REDIRECT_ORIGINS") or []
+    if u not in allowed:
+        raise APIError(
+            "Invalid redirect_uri. Use the site origin (e.g. http://localhost:4600), add it to "
+            "Google Cloud 'Authorized redirect URIs', and include it in Flask CORS "
+            "(FRONTEND_URL or CORS_EXTRA_ORIGINS).",
+            400,
+        )
+    return u
+
+
 def exchange_google_code(code, redirect_uri):
     """Exchange a Google authorization code for an access token."""
     client_id = current_app.config["GOOGLE_CLIENT_ID"]
@@ -100,10 +116,29 @@ def fetch_google_user_info(access_token):
     return resp.json()
 
 
+def _unique_username_from_google(name, email):
+    raw = "".join(c for c in (name or "").replace(" ", "").lower() if c.isalnum())
+    if not raw:
+        local = (email.split("@")[0] if email else "member").lower()
+        raw = "".join(c for c in local if c.isalnum()) or "member"
+    base = raw[:80]
+    username = base
+    n = 0
+    while User.query.filter_by(username=username).first():
+        n += 1
+        suffix = str(n)
+        username = (base[: max(1, 80 - len(suffix))] + suffix)
+    return username
+
+
 def find_or_create_google_user(info):
     """Find existing user by google_id or email, or create a new one."""
+    if not info.get("verified_email"):
+        raise APIError("Google account email is not verified", 400)
     google_id = info["id"]
-    email = info["email"]
+    email = (info.get("email") or "").strip().lower()
+    if not email:
+        raise APIError("Google did not return an email address", 400)
     name = info.get("name", email.split("@")[0])
     avatar = info.get("picture")
 
@@ -115,13 +150,13 @@ def find_or_create_google_user(info):
     user = User.query.filter_by(email=email).first()
     if user:
         user.google_id = google_id
-        user.avatar_url = avatar
+        user.avatar_url = avatar or user.avatar_url
         db.session.commit()
         return user
 
     # Brand new user
     user = User(
-        username=name.replace(" ", "").lower()[:80],
+        username=_unique_username_from_google(name, email),
         email=email,
         google_id=google_id,
         avatar_url=avatar,
@@ -174,13 +209,54 @@ def me():
     raise APIError("Not logged in", 401)
 
 
+@auth_bp.route("/google-config", methods=["GET"])
+@handle_errors
+def google_config():
+    """Public: OAuth client id for Google Identity Services (code client)."""
+    cid = current_app.config.get("GOOGLE_CLIENT_ID")
+    if not cid:
+        return jsonify({"clientId": None, "enabled": False})
+    return jsonify({"clientId": cid, "enabled": True})
+
+
+@auth_bp.route("/google/link", methods=["POST"])
+@handle_errors
+def google_link():
+    """Link Google to the logged-in account (Google email must match profile email)."""
+    user = require_auth()
+    data = require_json()
+    require_fields(data, "code", "redirect_uri")
+    redirect_uri = normalize_oauth_redirect_uri(data["redirect_uri"])
+    access_token = exchange_google_code(data["code"], redirect_uri)
+    info = fetch_google_user_info(access_token)
+    if not info.get("verified_email"):
+        raise APIError("Google account email is not verified", 400)
+    google_email = (info.get("email") or "").strip().lower()
+    if not google_email or google_email != user.email.strip().lower():
+        raise APIError(
+            "This Google account email must match your member profile email (%s)."
+            % user.email,
+            400,
+        )
+    gid = info["id"]
+    other = User.query.filter(User.google_id == gid, User.id != user.id).first()
+    if other:
+        raise APIError("This Google account is already linked to another member.", 409)
+    user.google_id = gid
+    if info.get("picture"):
+        user.avatar_url = info["picture"]
+    db.session.commit()
+    login_user(user)
+    return jsonify(user.to_dict())
+
+
 @auth_bp.route("/google", methods=["POST"])
 @handle_errors
 def google_login():
     """Orchestrator: parse → exchange code → fetch profile → find/create user → login → respond."""
     data = require_json()
-    require_fields(data, "code")
-    redirect_uri = data.get("redirect_uri", "postmessage")
+    require_fields(data, "code", "redirect_uri")
+    redirect_uri = normalize_oauth_redirect_uri(data["redirect_uri"])
     access_token = exchange_google_code(data["code"], redirect_uri)
     info = fetch_google_user_info(access_token)
     user = find_or_create_google_user(info)

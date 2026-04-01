@@ -5,6 +5,7 @@ flask-cors
 werkzeug>=3.0
 requests>=2.31
 python-dotenv>=1.0
+APScheduler>=3.10
 # Production extras (uncomment when deploying):
 # gunicorn>=21.0
 # psycopg2-binary>=2.9   # swap SQLite for PostgreSQL

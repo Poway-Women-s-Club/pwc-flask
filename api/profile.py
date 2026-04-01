@@ -33,6 +33,9 @@ def apply_profile_updates(user, data):
         email = data["email"].strip().lower()
         if not email or "@" not in email:
             raise APIError("Invalid email address", 400)
+        if email != user.email:
+            user.google_id = None
+            user.avatar_url = None
         user.email = email
     if "bio" in data:
         user.bio = data["bio"].strip()

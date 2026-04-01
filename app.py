@@ -7,6 +7,7 @@ seeds sample data on first run, and exposes a health endpoint.
 
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
@@ -17,7 +18,10 @@ from werkzeug.security import generate_password_hash
 from model.database import db
 from model.user import User
 
-load_dotenv()
+# Load `.env` from this package directory (not the shell cwd), so `python main.py`
+# works the same from any working directory.
+_APP_ROOT = Path(__file__).resolve().parent
+load_dotenv(_APP_ROOT / ".env")
 
 
 def create_app(config=None):
@@ -33,6 +37,17 @@ def create_app(config=None):
         GOOGLE_CLIENT_ID=os.environ.get("GOOGLE_CLIENT_ID", ""),
         GOOGLE_CLIENT_SECRET=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
 
+        # Outbound email (SMTP). Gmail: use an App Password with 2FA enabled.
+        MAIL_SERVER=os.environ.get("MAIL_SERVER", ""),
+        MAIL_PORT=int(os.environ.get("MAIL_PORT", "587")),
+        MAIL_USE_TLS=os.environ.get("MAIL_USE_TLS", "true").lower() in {"1", "true", "yes"},
+        MAIL_USERNAME=os.environ.get("MAIL_USERNAME", ""),
+        MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD", ""),
+        MAIL_DEFAULT_SENDER=os.environ.get("MAIL_DEFAULT_SENDER", ""),
+
+        # Set REMINDER_SCHEDULER_DISABLED=1 to skip APScheduler (e.g. tests)
+        REMINDER_SCHEDULER_DISABLED=os.environ.get("REMINDER_SCHEDULER_DISABLED", ""),
+
         # Session cookies (None + Secure required for cross-origin auth)
         SESSION_COOKIE_SAMESITE="None",
         SESSION_COOKIE_SECURE=True,
@@ -43,12 +58,20 @@ def create_app(config=None):
 
     # ── Extensions ─────────────────────────────────────────────────
     frontend_origin = os.environ.get("FRONTEND_URL", "http://localhost:4600")
-    CORS(app, supports_credentials=True, origins=[
+    cors_origins = [
         "http://localhost:4600",
         "http://127.0.0.1:4600",
         "https://poway-women-s-club.github.io",
+        "http://localhost:4000",
+        "http://127.0.0.1:4000",
         frontend_origin,
-    ])
+    ]
+    extra = os.environ.get("CORS_EXTRA_ORIGINS", "")
+    if extra:
+        cors_origins.extend(o.strip() for o in extra.split(",") if o.strip())
+    CORS(app, supports_credentials=True, origins=cors_origins)
+    # Google token exchange (popup UX) must use the same redirect_uri as the page origin.
+    app.config["OAUTH_REDIRECT_ORIGINS"] = sorted({o.rstrip("/") for o in cors_origins if o})
 
     db.init_app(app)
 
@@ -98,7 +121,33 @@ def create_app(config=None):
         _seed_data()
         _ensure_cyrus_admin_account()
 
+    _start_reminder_scheduler(app)
+
     return app
+
+
+def _start_reminder_scheduler(app):
+    if app.config.get("REMINDER_SCHEDULER_DISABLED"):
+        return
+    # Avoid duplicate schedulers with Flask debug reloader (parent + child).
+    if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        scheduler = BackgroundScheduler(daemon=True)
+
+        def job():
+            with app.app_context():
+                from api.reminder_jobs import process_event_reminders
+                process_event_reminders()
+
+        scheduler.add_job(job, "interval", seconds=60, id="pwc_event_reminders")
+        scheduler.start()
+        import atexit
+        atexit.register(lambda: scheduler.shutdown(wait=False))
+    except Exception as e:
+        print("Reminder scheduler not started:", e)
 
 
 def _sync_schema():
@@ -150,6 +199,18 @@ def _sync_schema():
             if "visibility_scope" not in event_cols:
                 with db.engine.begin() as conn:
                     conn.execute(text("ALTER TABLE events ADD COLUMN visibility_scope VARCHAR(16) NOT NULL DEFAULT 'club'"))
+
+        if "rsvps" in inspector.get_table_names():
+            rsvp_cols = {c["name"] for c in inspector.get_columns("rsvps")}
+            with db.engine.begin() as conn:
+                if "wants_email_reminder" not in rsvp_cols:
+                    conn.execute(text(
+                        "ALTER TABLE rsvps ADD COLUMN wants_email_reminder BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+                if "reminder_sent_at" not in rsvp_cols:
+                    conn.execute(text(
+                        "ALTER TABLE rsvps ADD COLUMN reminder_sent_at DATETIME"
+                    ))
 
         if "event_visible_groups" not in inspector.get_table_names():
             with db.engine.begin() as conn:

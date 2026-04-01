@@ -70,6 +70,10 @@ class RSVP(db.Model):
     event_id   = db.Column(db.Integer, db.ForeignKey("events.id"),  nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+    wants_email_reminder = db.Column(db.Boolean, nullable=False, default=False)
+    # Set when the "30 minutes before" reminder email is sent (idempotency).
+    reminder_sent_at = db.Column(db.DateTime, nullable=True)
+
     __table_args__ = (db.UniqueConstraint("user_id", "event_id"),)
 
 
