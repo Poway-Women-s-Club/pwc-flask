@@ -24,6 +24,14 @@ _APP_ROOT = Path(__file__).resolve().parent
 load_dotenv(_APP_ROOT / ".env")
 
 
+def _session_cookie_kwargs():
+    cross_site = os.environ.get("SESSION_COOKIE_CROSS_SITE", "").lower() in {"1", "true", "yes"}
+    production = os.environ.get("FLASK_ENV", "").lower() == "production"
+    if cross_site or production:
+        return {"SESSION_COOKIE_SAMESITE": "None", "SESSION_COOKIE_SECURE": True}
+    return {"SESSION_COOKIE_SAMESITE": "Lax", "SESSION_COOKIE_SECURE": False}
+
+
 def create_app(config=None):
     app = Flask(__name__)
 
@@ -48,9 +56,12 @@ def create_app(config=None):
         # Set REMINDER_SCHEDULER_DISABLED=1 to skip APScheduler (e.g. tests)
         REMINDER_SCHEDULER_DISABLED=os.environ.get("REMINDER_SCHEDULER_DISABLED", ""),
 
-        # Session cookies (None + Secure required for cross-origin auth)
-        SESSION_COOKIE_SAMESITE="None",
-        SESSION_COOKIE_SECURE=True,
+        # Session cookies: on plain http://localhost, Secure=True breaks login (browser drops cookie).
+        # Use SESSION_COOKIE_CROSS_SITE=1 (or FLASK_ENV=production) when frontend and API are on
+        # different HTTPS sites (e.g. GitHub Pages → Render) so browsers send cookies on API calls.
+        **(
+            _session_cookie_kwargs()
+        ),
     )
 
     if config:
