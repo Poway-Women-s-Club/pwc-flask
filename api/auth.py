@@ -144,13 +144,17 @@ def find_or_create_google_user(info):
 
     user = User.query.filter_by(google_id=google_id).first()
     if user:
+        if avatar and not getattr(user, "avatar_custom", False):
+            user.avatar_url = avatar
+            db.session.commit()
         return user
 
     # Check if email already exists (link accounts)
     user = User.query.filter_by(email=email).first()
     if user:
         user.google_id = google_id
-        user.avatar_url = avatar or user.avatar_url
+        if not getattr(user, "avatar_custom", False):
+            user.avatar_url = avatar or user.avatar_url
         db.session.commit()
         return user
 
@@ -243,7 +247,7 @@ def google_link():
     if other:
         raise APIError("This Google account is already linked to another member.", 409)
     user.google_id = gid
-    if info.get("picture"):
+    if info.get("picture") and not getattr(user, "avatar_custom", False):
         user.avatar_url = info["picture"]
     db.session.commit()
     login_user(user)

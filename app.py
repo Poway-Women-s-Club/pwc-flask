@@ -56,6 +56,9 @@ def create_app(config=None):
         # Set REMINDER_SCHEDULER_DISABLED=1 to skip APScheduler (e.g. tests)
         REMINDER_SCHEDULER_DISABLED=os.environ.get("REMINDER_SCHEDULER_DISABLED", ""),
 
+        # Public API URL for absolute avatar links in JSON (e.g. https://api.example.com)
+        PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
+
         # Session cookies: on plain http://localhost, Secure=True breaks login (browser drops cookie).
         # Use SESSION_COOKIE_CROSS_SITE=1 (or FLASK_ENV=production) when frontend and API are on
         # different HTTPS sites (e.g. GitHub Pages → Render) so browsers send cookies on API calls.
@@ -182,6 +185,7 @@ def _sync_schema():
                 "bio":        "TEXT NOT NULL DEFAULT ''",
                 "languages":  "TEXT NOT NULL DEFAULT '[]'",
                 "interests":  "TEXT NOT NULL DEFAULT '[]'",
+                "avatar_custom": "BOOLEAN NOT NULL DEFAULT 0",
             }
             with db.engine.begin() as conn:
                 for col, typedef in new_cols.items():

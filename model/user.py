@@ -4,7 +4,7 @@ User model.
 Fields match what the frontend expects in to_dict():
   id, username, email, role, is_active_member,
   first_name, last_name, bio, languages, interests,
-  avatar_url, google_id, created_at
+  avatar_url, avatar_custom, google_id, created_at
 """
 
 from datetime import datetime
@@ -31,9 +31,10 @@ class User(UserMixin, db.Model):
     languages   = db.Column(db.JSON,        nullable=False, default=list)
     interests   = db.Column(db.JSON,        nullable=False, default=list)
 
-    # OAuth / avatar
-    google_id   = db.Column(db.String(128), unique=True, nullable=True)
-    avatar_url  = db.Column(db.String(512), nullable=True)
+    # OAuth / avatar (avatar_custom=True → uploaded JPEG at instance/avatars/<id>.jpg)
+    google_id      = db.Column(db.String(128), unique=True, nullable=True)
+    avatar_url     = db.Column(db.String(512), nullable=True)
+    avatar_custom  = db.Column(db.Boolean, nullable=False, default=False)
 
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -69,5 +70,6 @@ class User(UserMixin, db.Model):
             "languages":        self.languages or [],
             "interests":        self.interests  or [],
             "avatar_url":       self.avatar_url,
+            "avatar_custom":    bool(self.avatar_custom),
             "created_at":       self.created_at.isoformat(),
         }
