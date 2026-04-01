@@ -46,6 +46,7 @@ def create_app(config=None):
     CORS(app, supports_credentials=True, origins=[
         "http://localhost:4600",
         "http://127.0.0.1:4600",
+        "https://poway-women-s-club.github.io",
         frontend_origin,
     ])
 
