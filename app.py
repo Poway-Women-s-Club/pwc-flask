@@ -83,9 +83,6 @@ def create_app(config=None):
     extra = os.environ.get("CORS_EXTRA_ORIGINS", "")
     if extra:
         cors_origins.extend(o.strip() for o in extra.split(",") if o.strip())
-    CORS(app, supports_credentials=True, origins=cors_origins)
-    # Google token exchange (popup UX) must use the same redirect_uri as the page origin.
-    app.config["OAUTH_REDIRECT_ORIGINS"] = sorted({o.rstrip("/") for o in cors_origins if o})
 
     def _flatten_cors_header_value(value):
         """
@@ -102,6 +99,8 @@ def create_app(config=None):
                     parts.append(p)
         return ", ".join(parts)
 
+    # Register *before* CORS(...): Flask runs after_request in reverse registration order,
+    # so this hook must run *after* flask-cors sets headers (otherwise CORS overwrites our fix).
     @app.after_request
     def _fix_cors_headers_for_http2(response):
         for hdr in ("Access-Control-Allow-Methods", "Access-Control-Allow-Headers"):
@@ -114,6 +113,10 @@ def create_app(config=None):
             except Exception:
                 pass
         return response
+
+    CORS(app, supports_credentials=True, origins=cors_origins)
+    # Google token exchange (popup UX) must use the same redirect_uri as the page origin.
+    app.config["OAUTH_REDIRECT_ORIGINS"] = sorted({o.rstrip("/") for o in cors_origins if o})
 
     db.init_app(app)
 
