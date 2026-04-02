@@ -48,10 +48,23 @@ def _delete_avatar_file(user_id):
 
 
 def _public_api_base():
+    """
+    Build the absolute base URL used in avatar_url.
+
+    Works behind reverse proxies by honoring X-Forwarded-* headers.
+    Prefer PUBLIC_BASE_URL when explicitly set.
+    """
     base = (current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
     if base:
-        return base
-    return request.url_root.rstrip("/")
+        # If PUBLIC_BASE_URL was accidentally set to localhost, prefer forwarded headers instead.
+        forwarded_host = request.headers.get("X-Forwarded-Host") or ""
+        if ("localhost" not in base and "127.0.0.1" not in base) or not forwarded_host:
+            return base
+
+    # Reverse proxy friendliness: prefer forwarded proto/host if present.
+    proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    return f"{proto}://{host}".rstrip("/")
 
 
 def _set_custom_avatar_url(user):
