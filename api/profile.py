@@ -221,3 +221,76 @@ def get_avatar_image(user_id):
     rv = make_response(send_file(path, mimetype="image/jpeg", conditional=True))
     rv.headers["Cache-Control"] = "public, max-age=86400"
     return rv
+
+
+@profile_bp.route("/recommendations", methods=["GET"])
+@handle_errors
+def profile_recommendations():
+    """
+    ML-style content-based ranking: TF–IDF profile vector vs groups/events (cosine similarity).
+    Excludes groups the member already joined and events they already RSVPed.
+    """
+    from api.events import query_events, _is_event_visible_to_user
+    from api.groups import get_user_group_ids
+    from model.event import RSVP
+    from model.group import Group
+    from services.recommendation_ml import recommend_groups_events
+
+    user = require_auth()
+    bio = (user.bio or "").strip()
+    interests = list(user.interests or [])
+    languages = list(user.languages or [])
+    if not bio and not interests and not languages:
+        raise APIError(
+            "Add a bio, interests, or languages to your profile to run recommendations.",
+            400,
+        )
+
+    try:
+        top_gi = max(1, min(20, int(request.args.get("top_groups", "5"))))
+        top_ei = max(1, min(20, int(request.args.get("top_events", "5"))))
+    except (TypeError, ValueError):
+        top_gi, top_ei = 5, 5
+
+    my_groups = get_user_group_ids(user.id)
+    group_rows = []
+    for g in Group.query.order_by(Group.name.asc()).all():
+        if g.id in my_groups:
+            continue
+        combined = f"{g.name}\n{g.description or ''}"
+        group_rows.append((g.id, g.name, g.description or "", combined))
+
+    rsvped_ids = {r.event_id for r in RSVP.query.filter_by(user_id=user.id).all()}
+    raw_events = query_events(upcoming_only=True)
+    event_rows = []
+    for e in raw_events:
+        if e.id in rsvped_ids:
+            continue
+        if not _is_event_visible_to_user(e, user):
+            continue
+        gn = ""
+        if e.group_id:
+            grp = Group.query.get(e.group_id)
+            if grp:
+                gn = grp.name
+        combined = f"{e.title}\n{e.description or ''}\n{e.location or ''}\n{gn}"
+        event_rows.append(
+            (
+                e.id,
+                e.title,
+                e.start_time.isoformat(),
+                e.location or "",
+                combined,
+            )
+        )
+
+    payload = recommend_groups_events(
+        bio,
+        interests,
+        languages,
+        group_rows,
+        event_rows,
+        top_groups=top_gi,
+        top_events=top_ei,
+    )
+    return jsonify(payload)
