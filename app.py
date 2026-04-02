@@ -86,35 +86,53 @@ def create_app(config=None):
 
     def _flatten_cors_header_value(value):
         """
-        flask-cors may fold long Access-Control-* values across lines (HTTP/1 obs-fold).
-        HTTP/2 does not allow that framing; Chrome/Edge fail with ERR_HTTP2_PROTOCOL_ERROR.
+        Proxies / older stacks may deliver obs-folded Access-Control-* values (newlines).
+        HTTP/2 forbids that; browsers report ERR_HTTP2_PROTOCOL_ERROR.
         """
-        if not value or ("\n" not in value and "\r" not in value):
-            return value
+        if value is None:
+            return None
+        s = str(value).replace("\r", "\n")
+        if "\n" not in s:
+            return s.strip()
         parts = []
-        for segment in str(value).replace("\r", "\n").split("\n"):
+        for segment in s.split("\n"):
             for piece in segment.split(","):
                 p = piece.strip()
                 if p:
                     parts.append(p)
         return ", ".join(parts)
 
-    # Register *before* CORS(...): Flask runs after_request in reverse registration order,
-    # so this hook must run *after* flask-cors sets headers (otherwise CORS overwrites our fix).
-    @app.after_request
     def _fix_cors_headers_for_http2(response):
         for hdr in ("Access-Control-Allow-Methods", "Access-Control-Allow-Headers"):
             if hdr not in response.headers:
                 continue
             try:
                 raw = response.headers.get(hdr)
-                if raw and ("\n" in raw or "\r" in raw):
-                    response.headers[hdr] = _flatten_cors_header_value(raw)
+                if raw:
+                    flat = _flatten_cors_header_value(raw)
+                    if flat:
+                        response.headers[hdr] = flat
             except Exception:
                 pass
         return response
 
-    CORS(app, supports_credentials=True, origins=cors_origins)
+    # Short explicit methods string keeps Allow-Methods compact (less proxy folding).
+    _cors_allow_headers = [
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "Origin",
+        "X-Origin",
+        "X-Requested-With",
+    ]
+    CORS(
+        app,
+        supports_credentials=True,
+        origins=cors_origins,
+        methods="GET, HEAD, POST, OPTIONS, PUT, PATCH, DELETE",
+        allow_headers=_cors_allow_headers,
+        max_age=600,
+    )
     # Google token exchange (popup UX) must use the same redirect_uri as the page origin.
     app.config["OAUTH_REDIRECT_ORIGINS"] = sorted({o.rstrip("/") for o in cors_origins if o})
 
@@ -167,6 +185,10 @@ def create_app(config=None):
         _ensure_cyrus_admin_account()
 
     _start_reminder_scheduler(app)
+
+    # Run after *all* other after_request hooks (flask-cors, etc.): insert at front of the
+    # deque so reversed iteration invokes this last.
+    app.after_request_funcs.setdefault(None, []).insert(0, _fix_cors_headers_for_http2)
 
     return app
 

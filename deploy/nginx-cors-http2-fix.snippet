@@ -1,0 +1,16 @@
+# Paste inside the `location / { ... }` block that `proxy_pass`es to your Flask app
+# (e.g. server_name pwc-flask.opencodingsociety.com).
+#
+# flask-cors can emit folded (multi-line) Access-Control-Allow-Methods / -Headers.
+# That is invalid on HTTP/2; Chrome reports net::ERR_HTTP2_PROTOCOL_ERROR.
+# Hiding those from the upstream response and re-adding single-line values fixes it.
+#
+# After editing: `sudo nginx -t && sudo systemctl reload nginx`
+
+proxy_hide_header Access-Control-Allow-Methods;
+proxy_hide_header Access-Control-Allow-Headers;
+add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, HEAD" always;
+add_header Access-Control-Allow-Headers "Authorization, Origin, X-Origin, X-Requested-With, Content-Type, Accept" always;
+
+# Alternative (band-aid): force HTTP/1.1 for clients by removing `http2` from listen:
+#   listen 443 ssl;     # not: listen 443 ssl http2;
