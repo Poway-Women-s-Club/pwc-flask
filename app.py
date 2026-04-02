@@ -87,6 +87,34 @@ def create_app(config=None):
     # Google token exchange (popup UX) must use the same redirect_uri as the page origin.
     app.config["OAUTH_REDIRECT_ORIGINS"] = sorted({o.rstrip("/") for o in cors_origins if o})
 
+    def _flatten_cors_header_value(value):
+        """
+        flask-cors may fold long Access-Control-* values across lines (HTTP/1 obs-fold).
+        HTTP/2 does not allow that framing; Chrome/Edge fail with ERR_HTTP2_PROTOCOL_ERROR.
+        """
+        if not value or ("\n" not in value and "\r" not in value):
+            return value
+        parts = []
+        for segment in str(value).replace("\r", "\n").split("\n"):
+            for piece in segment.split(","):
+                p = piece.strip()
+                if p:
+                    parts.append(p)
+        return ", ".join(parts)
+
+    @app.after_request
+    def _fix_cors_headers_for_http2(response):
+        for hdr in ("Access-Control-Allow-Methods", "Access-Control-Allow-Headers"):
+            if hdr not in response.headers:
+                continue
+            try:
+                raw = response.headers.get(hdr)
+                if raw and ("\n" in raw or "\r" in raw):
+                    response.headers[hdr] = _flatten_cors_header_value(raw)
+            except Exception:
+                pass
+        return response
+
     db.init_app(app)
 
     login_manager = LoginManager()

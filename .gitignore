@@ -8,4 +8,3 @@ __pycache__/
 # SQLite — per machine / deploy; never commit (avoids merge conflicts)
 *.db
 instance/*.db
-
