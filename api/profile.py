@@ -5,15 +5,17 @@ The frontend profile.js sends firstName, lastName, bio, languages, interests.
 This blueprint maps those to the User model and persists them.
 
 Endpoints:
-  GET  /api/profile/me      — return current user's full profile
-  PUT  /api/profile/me      — update profile fields
-  PUT  /api/profile/password — change password
+  GET  /api/profile/<user_id> — return a user's public profile (auth required)
+  GET  /api/profile/me        — return current user's full profile
+  PUT  /api/profile/me        — update profile fields
+  PUT  /api/profile/password  — change password
 """
 
 from flask import Blueprint, jsonify
 from werkzeug.security import generate_password_hash
 
 from model.database import db
+from model.user import User
 from api.utils import (
     APIError, handle_errors, require_json, require_auth,
 )
@@ -58,6 +60,17 @@ def verify_and_change_password(user, current_pw, new_pw, confirm_pw):
 
 
 # ── Orchestrator routes ──
+
+@profile_bp.route("/<int:user_id>", methods=["GET"])
+@handle_errors
+def get_public_profile(user_id):
+    """Return a user's public profile. Requires authentication."""
+    require_auth()
+    user = User.query.get(user_id)
+    if not user:
+        raise APIError("User not found", 404)
+    return jsonify(user.to_dict())
+
 
 @profile_bp.route("/me", methods=["GET"])
 @handle_errors
