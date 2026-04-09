@@ -21,6 +21,7 @@ from model.message import Message
 from api.utils import (
     APIError, handle_errors, require_json, require_fields, require_auth,
 )
+from api.friends import are_friends
 
 messages_bp = Blueprint("messages", __name__)
 
@@ -138,9 +139,11 @@ def list_conversations():
 @messages_bp.route("/conversations/<int:other_id>", methods=["GET"])
 @handle_errors
 def get_conversation(other_id):
-    """Orchestrator: require auth → verify partner exists → fetch thread → respond."""
+    """Orchestrator: require auth → verify partner exists → check friends → fetch thread → respond."""
     user  = require_auth()
     other = get_other_user_or_404(other_id)
+    if not are_friends(user.id, other.id):
+        raise APIError("You must be friends to view this conversation", 403)
     msgs  = get_thread(user.id, other.id)
     return jsonify({
         "partner":  other.to_dict(),
@@ -151,11 +154,13 @@ def get_conversation(other_id):
 @messages_bp.route("/conversations/<int:other_id>", methods=["POST"])
 @handle_errors
 def send_message(other_id):
-    """Orchestrator: require auth → verify partner → parse body → create → respond."""
+    """Orchestrator: require auth → verify partner → check friends → parse body → create → respond."""
     user  = require_auth()
     other = get_other_user_or_404(other_id)
     if other.id == user.id:
         raise APIError("Cannot send a message to yourself", 400)
+    if not are_friends(user.id, other.id):
+        raise APIError("You must be friends to send a message", 403)
     data = require_json()
     require_fields(data, "body")
     msg = create_message(user.id, other.id, data["body"])

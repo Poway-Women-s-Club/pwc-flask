@@ -18,6 +18,7 @@ from flask import Blueprint, abort, current_app, jsonify, make_response, request
 from werkzeug.security import generate_password_hash
 
 from model.database import db
+from model.user import User
 from api.utils import (
     APIError, handle_errors, require_json, require_auth,
 )
@@ -153,6 +154,17 @@ def verify_and_change_password(user, current_pw, new_pw, confirm_pw):
 
 
 # ── Orchestrator routes ──
+
+@profile_bp.route("/<int:user_id>", methods=["GET"])
+@handle_errors
+def get_public_profile(user_id):
+    """Return a user's public profile. Requires authentication."""
+    require_auth()
+    user = User.query.get(user_id)
+    if not user:
+        raise APIError("User not found", 404)
+    return jsonify(user.to_dict())
+
 
 @profile_bp.route("/me", methods=["GET"])
 @handle_errors

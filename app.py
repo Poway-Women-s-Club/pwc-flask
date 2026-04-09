@@ -158,6 +158,7 @@ def create_app(config=None):
     from api.messages import messages_bp
     from api.profile  import profile_bp
     from api.groups   import groups_bp
+    from api.friends  import friends_bp
 
     app.register_blueprint(auth_bp,     url_prefix="/api/auth")
     app.register_blueprint(admin_bp,    url_prefix="/api/admin")
@@ -167,6 +168,7 @@ def create_app(config=None):
     app.register_blueprint(messages_bp, url_prefix="/api/messages")
     app.register_blueprint(profile_bp,  url_prefix="/api/profile")
     app.register_blueprint(groups_bp,   url_prefix="/api/groups")
+    app.register_blueprint(friends_bp,  url_prefix="/api/friends")
 
     # ── Health check ───────────────────────────────────────────────
     @app.route("/api/health")
@@ -298,6 +300,20 @@ def _sync_schema():
                     conn.execute(text(
                         "ALTER TABLE groups ADD COLUMN requires_application BOOLEAN NOT NULL DEFAULT 0"
                     ))
+
+        if "friendships" not in inspector.get_table_names():
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS friendships ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "requester_id INTEGER NOT NULL REFERENCES users(id), "
+                    "addressee_id INTEGER NOT NULL REFERENCES users(id), "
+                    "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                    "created_at DATETIME NOT NULL, "
+                    "updated_at DATETIME, "
+                    "UNIQUE(requester_id, addressee_id)"
+                    ")"
+                ))
 
         if "group_applications" not in inspector.get_table_names():
             with db.engine.begin() as conn:
