@@ -12,7 +12,7 @@ Endpoints:
   POST /api/messages/conversations/<id>/read — mark all messages from user as read
 """
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from datetime import datetime
 
 from model.database import db
@@ -36,9 +36,9 @@ def get_other_user_or_404(user_id):
     return user
 
 
-def get_thread(user_a_id, user_b_id):
-    """Fetch all messages between two users, oldest first."""
-    return (
+def get_thread(user_a_id, user_b_id, since=None):
+    """Fetch all messages between two users, oldest first. Optionally only messages after `since` (datetime)."""
+    q = (
         Message.query
         .filter(
             db.or_(
@@ -46,9 +46,10 @@ def get_thread(user_a_id, user_b_id):
                 db.and_(Message.sender_id == user_b_id, Message.recipient_id == user_a_id),
             )
         )
-        .order_by(Message.created_at.asc())
-        .all()
     )
+    if since:
+        q = q.filter(Message.created_at > since)
+    return q.order_by(Message.created_at.asc()).all()
 
 
 def get_latest_message(user_a_id, user_b_id):
@@ -139,12 +140,25 @@ def list_conversations():
 @messages_bp.route("/conversations/<int:other_id>", methods=["GET"])
 @handle_errors
 def get_conversation(other_id):
-    """Orchestrator: require auth → verify partner exists → check friends → fetch thread → respond."""
+    """Orchestrator: require auth → verify partner exists → check friends → fetch thread → respond.
+
+    Optional query param: ?since=<ISO-8601 datetime> — returns only messages after that timestamp.
+    Use this for polling: pass the created_at of the last known message to fetch only new ones.
+    """
     user  = require_auth()
     other = get_other_user_or_404(other_id)
     if not are_friends(user.id, other.id):
         raise APIError("You must be friends to view this conversation", 403)
-    msgs  = get_thread(user.id, other.id)
+
+    since = None
+    since_str = request.args.get("since")
+    if since_str:
+        try:
+            since = datetime.fromisoformat(since_str.replace("Z", "+00:00"))
+        except ValueError:
+            raise APIError("Invalid 'since' timestamp — use ISO-8601 format", 400)
+
+    msgs = get_thread(user.id, other.id, since=since)
     return jsonify({
         "partner":  other.to_dict(),
         "messages": [m.to_dict() for m in msgs],
