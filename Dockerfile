@@ -10,7 +10,7 @@ FROM docker.io/python:3.11
   RUN pip install --no-cache-dir -r requirements.txt
   RUN pip install gunicorn
 
-  ENV GUNICORN_CMD_ARGS="--workers=1 --bind=0.0.0.0:8327"
+  ENV GUNICORN_CMD_ARGS="--workers=2 --threads=4 --bind=0.0.0.0:8327"
 
   EXPOSE 8327
 
