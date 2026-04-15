@@ -189,6 +189,26 @@ def decline_request(other_id):
     return jsonify(f.to_dict())
 
 
+@friends_bp.route("/search", methods=["GET"])
+@handle_errors
+def search_users():
+    """Search users by username prefix/substring. Returns up to 20 results with friendship status."""
+    from flask import request
+    user = require_auth()
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify([])
+    matches = User.query.filter(
+        User.username.ilike(f"%{q}%"),
+        User.id != user.id,
+    ).limit(20).all()
+    result = []
+    for u in matches:
+        status = friendship_status_for(user.id, u.id)
+        result.append({**u.to_dict(), "friendship_status": status})
+    return jsonify(result)
+
+
 @friends_bp.route("/<int:other_id>", methods=["DELETE"])
 @handle_errors
 def unfriend(other_id):
