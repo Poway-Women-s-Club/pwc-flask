@@ -139,7 +139,7 @@ def send_request(other_id):
         if existing.status == "accepted":
             raise APIError("Already friends", 400)
         if existing.status == "pending":
-            raise APIError("Friend request already pending", 400)
+            return jsonify(existing.to_dict()), 200
         if existing.status == "declined":
             # Allow re-requesting by resetting the row
             existing.requester_id = user.id
