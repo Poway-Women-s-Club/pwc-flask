@@ -88,13 +88,9 @@ def build_post_query(args):
     if sort == "oldest":
         secondary_sort = BlogPost.created_at.asc()
     elif sort == "popular":
-        comment_count_subq = (
-            db.session.query(func.count(Comment.id))
-            .filter(Comment.post_id == BlogPost.id)
-            .correlate(BlogPost)
-            .scalar_subquery()
-        )
-        secondary_sort = comment_count_subq.desc()
+        # Use a LEFT JOIN + GROUP BY so comment count is a proper aggregate column
+        q = q.outerjoin(Comment, Comment.post_id == BlogPost.id).group_by(BlogPost)
+        secondary_sort = func.count(Comment.id).desc()
     elif sort == "az":
         secondary_sort = BlogPost.title.asc()
     elif sort == "za":
@@ -124,7 +120,8 @@ def paginate_query(query, args):
     """Apply pagination and return (items, total, page, per_page)."""
     page = max(int(args.get("page", 1)), 1)
     per_page = min(max(int(args.get("per_page", 10)), 1), 50)
-    total = query.count()
+    # Strip ORDER BY for the count to avoid issues with complex sort expressions
+    total = query.order_by(None).count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
     return items, total, page, per_page
 
