@@ -81,7 +81,27 @@ def build_post_query(args):
             ),
         )
 
-    # Sort: pinned first, then newest
+    # Sort: pinned always first, then by requested sort order
+    from sqlalchemy import func
+    sort = args.get("sort", "newest")
+
+    if sort == "oldest":
+        secondary_sort = BlogPost.created_at.asc()
+    elif sort == "popular":
+        comment_count_subq = (
+            db.session.query(func.count(Comment.id))
+            .filter(Comment.post_id == BlogPost.id)
+            .correlate(BlogPost)
+            .scalar_subquery()
+        )
+        secondary_sort = comment_count_subq.desc()
+    elif sort == "az":
+        secondary_sort = BlogPost.title.asc()
+    elif sort == "za":
+        secondary_sort = BlogPost.title.desc()
+    else:  # newest (default)
+        secondary_sort = BlogPost.created_at.desc()
+
     now = datetime.utcnow()
     q = q.order_by(
         db.case(
@@ -94,7 +114,7 @@ def build_post_query(args):
             ), 0),
             else_=1,
         ),
-        BlogPost.created_at.desc(),
+        secondary_sort,
     )
 
     return q
